@@ -3,8 +3,8 @@ import { pendientes, parseMonto, formatMonto } from "../utils.js";
 import { CATEGORIA_KEYBOARD } from "../keyboards.js";
 
 export function registerRegistroHandlers(bot) {
-  bot.on("text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) return;
+  bot.on("text", async (ctx, next) => {
+    if (ctx.message.text.startsWith("/")) return next();
 
     const texto = ctx.message.text.trim();
     const match = texto.match(/^([\d.,]+)\s+(.+?)(\s+USD)?$/i);
