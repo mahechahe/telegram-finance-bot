@@ -44,6 +44,7 @@ export function formatMonto(monto, moneda) {
 
 export function formatFecha(date) {
   return new Date(date).toLocaleString("es-CO", {
+    timeZone: "America/Bogota",
     day: "numeric",
     month: "short",
     hour: "2-digit",
