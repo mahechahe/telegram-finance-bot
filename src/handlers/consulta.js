@@ -12,20 +12,19 @@ function formatGasto(g) {
   ].join("\n");
 }
 
-async function fetchGastos(where = {}) {
+async function fetchGastos(where) {
   return Gasto.findAll({ where, order: [["fecha", "DESC"]], limit: 10 });
 }
 
-async function fetchResumenMes() {
+async function fetchResumenMes(UsuarioId) {
   const inicioMes = new Date();
   inicioMes.setDate(1);
   inicioMes.setHours(0, 0, 0, 0);
 
   const gastos = await Gasto.findAll({
-    where: { fecha: { [Op.gte]: inicioMes } },
+    where: { UsuarioId, fecha: { [Op.gte]: inicioMes } },
   });
 
-  // Agrupar por categoría + moneda para no mezclar COP y USD
   const mapa = {};
   for (const g of gastos) {
     const key = `${g.categoria ?? "Sin categoría"}|${g.moneda}`;
@@ -45,9 +44,10 @@ export function registerConsultaHandlers(bot) {
 
   bot.action(/^gastos:(.+)$/, async (ctx) => {
     const filtro = ctx.match[1];
+    const UsuarioId = ctx.usuario.id;
 
     if (filtro === "resumen") {
-      const resumen = await fetchResumenMes();
+      const resumen = await fetchResumenMes(UsuarioId);
 
       if (!resumen.length) {
         await ctx.editMessageText("No hay gastos registrados este mes.");
@@ -60,7 +60,7 @@ export function registerConsultaHandlers(bot) {
       return ctx.answerCbQuery();
     }
 
-    const where = filtro !== "todos" ? { categoria: filtro } : {};
+    const where = { UsuarioId, ...(filtro !== "todos" && { categoria: filtro }) };
     const gastos = await fetchGastos(where);
 
     if (!gastos.length) {

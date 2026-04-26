@@ -43,7 +43,7 @@ export function registerRegistroHandlers(bot) {
     pendientes.delete(ctx.from.id);
 
     try {
-      await Gasto.create({ ...pendiente, categoria });
+      await Gasto.create({ ...pendiente, categoria, UsuarioId: ctx.usuario.id });
       await ctx.editMessageText(
         `✅ Guardado\n💰 ${formatMonto(pendiente.monto, pendiente.moneda)}\n📝 ${pendiente.descripcion}\n🏷 ${categoria}`
       );

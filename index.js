@@ -2,16 +2,18 @@ import "dotenv/config";
 import { createServer } from "http";
 import { Telegraf } from "telegraf";
 import { sequelize } from "./src/db.js";
+import { authMiddleware } from "./src/middleware/auth.js";
+import { registerAdminHandlers } from "./src/handlers/admin.js";
 import { registerRegistroHandlers } from "./src/handlers/registro.js";
 import { registerConsultaHandlers } from "./src/handlers/consulta.js";
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const MI_TELEGRAM_ID = Number(process.env.TELEGRAM_ID);
 
-bot.use((ctx, next) => {
-  if (ctx.from?.id !== MI_TELEGRAM_ID) return;
-  return next();
-});
+// Los handlers de admin van antes del auth para que el admin
+// pueda aprobar usuarios sin que el middleware lo intercepte
+registerAdminHandlers(bot);
+
+bot.use(authMiddleware);
 
 bot.command("start", (ctx) =>
   ctx.reply(
