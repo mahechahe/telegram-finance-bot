@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(md|txt|yml|yaml\\)$|README|\\\\.env|Makefile|\\\\.cursorrules\")",
+      "Read(//c/Users/mahec/OneDrive/Documentos/Code-varios/telegram-finance/**)",
+      "Bash(find . -maxdepth 2 -type f \\\\\\( -name \"*.md\" -o -name \"README*\" \\\\\\))"
+    ]
+  }
+}
