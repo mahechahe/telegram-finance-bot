@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createServer } from "http";
 import { Telegraf } from "telegraf";
 import { Sequelize, DataTypes } from "sequelize";
 
@@ -45,6 +46,9 @@ bot.on("text", async (ctx) => {
 await sequelize.sync();
 await bot.launch();
 console.log("🚀 Bot de Finanzas arrancado");
+
+const PORT = process.env.PORT || 80;
+createServer((_, res) => res.end("ok")).listen(PORT);
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
