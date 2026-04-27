@@ -51,3 +51,12 @@ export function formatFecha(date) {
     minute: "2-digit",
   });
 }
+
+// Retorna la medianoche de `date` en hora Bogotá, expresada como UTC.
+// Ejemplo: si en Bogotá es 2026-04-26, devuelve 2026-04-26T05:00:00Z
+export function startOfDayBogota(date = new Date()) {
+  const fechaBogota = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+  }).format(date); // "YYYY-MM-DD"
+  return new Date(`${fechaBogota}T00:00:00-05:00`);
+}

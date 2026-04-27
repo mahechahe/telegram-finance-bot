@@ -1,6 +1,6 @@
 import { Op } from "sequelize";
 import { Gasto, Ingreso, Cuenta, Categoria } from "../db.js";
-import { formatMonto, formatFecha } from "../utils.js";
+import { formatMonto, formatFecha, startOfDayBogota } from "../utils.js";
 import { filtroKeyboard, fechaNavKeyboard } from "../keyboards.js";
 import { getCategorias } from "./categorias.js";
 
@@ -60,9 +60,8 @@ async function fetchMovimientos({ whereGastos, whereIngresos, limit = 10 }) {
 }
 
 async function fetchResumenMes(UsuarioId) {
-  const inicioMes = new Date();
-  inicioMes.setDate(1);
-  inicioMes.setHours(0, 0, 0, 0);
+  const hoy = new Date();
+  const { desde: inicioMes } = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1);
 
   const [gastos, ingresos] = await Promise.all([
     fetchGastos({ UsuarioId, fecha: { [Op.gte]: inicioMes } }),
@@ -91,25 +90,27 @@ async function fetchResumenMes(UsuarioId) {
 
 // ── Rangos de fecha ────────────────────────────────────────────────────────────
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function rangoHoy() {
-  const desde = new Date();
-  desde.setHours(0, 0, 0, 0);
-  const hasta = new Date(desde);
-  hasta.setDate(hasta.getDate() + 1);
-  return { desde, hasta };
+  const desde = startOfDayBogota();
+  return { desde, hasta: new Date(desde.getTime() + DAY_MS) };
 }
 
 function rangoSemana() {
-  const hasta = new Date();
-  hasta.setHours(23, 59, 59, 999);
-  const desde = new Date();
-  desde.setDate(desde.getDate() - 6);
-  desde.setHours(0, 0, 0, 0);
+  const desde = startOfDayBogota(new Date(Date.now() - 6 * DAY_MS));
+  const hasta = new Date(startOfDayBogota().getTime() + DAY_MS);
   return { desde, hasta };
 }
 
 function rangoMes(year, month) {
-  return { desde: new Date(year, month - 1, 1), hasta: new Date(year, month, 1) };
+  const pad = n => String(n).padStart(2, "0");
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear  = month === 12 ? year + 1 : year;
+  return {
+    desde: new Date(`${year}-${pad(month)}-01T00:00:00-05:00`),
+    hasta: new Date(`${nextYear}-${pad(nextMonth)}-01T00:00:00-05:00`),
+  };
 }
 
 async function mostrarPorFecha(ctx, titulo, desde, hasta, keyboard) {
