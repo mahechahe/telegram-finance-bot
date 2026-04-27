@@ -1,19 +1,62 @@
 import { Op } from "sequelize";
-import { Gasto } from "../db.js";
+import { Gasto, Ingreso, Cuenta, Categoria } from "../db.js";
 import { formatMonto, formatFecha } from "../utils.js";
-import { FILTRO_KEYBOARD } from "../keyboards.js";
+import { filtroKeyboard, fechaNavKeyboard } from "../keyboards.js";
+import { getCategorias } from "./categorias.js";
+
+// ── Formato de cada movimiento ─────────────────────────────────────────────────
 
 function formatGasto(g) {
   return [
-    `📝 ${g.descripcion}`,
+    `⬇️ ${g.descripcion}`,
     `💰 ${formatMonto(g.monto, g.moneda)}`,
-    `🏷 ${g.categoria ?? "Sin categoría"}`,
+    `🏷 ${g.CategoriaObj?.nombre ?? "Sin categoría"}`,
+    g.Cuenta ? `📁 ${g.Cuenta.nombre}` : null,
     `📅 ${formatFecha(g.fecha)}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
-async function fetchGastos(where) {
-  return Gasto.findAll({ where, order: [["fecha", "DESC"]], limit: 10 });
+function formatIngreso(i) {
+  return [
+    `⬆️ ${i.descripcion}`,
+    `💰 ${formatMonto(i.monto, i.moneda)}`,
+    i.Cuenta ? `📁 ${i.Cuenta.nombre}` : null,
+    `📅 ${formatFecha(i.fecha)}`,
+  ].filter(Boolean).join("\n");
+}
+
+// ── Queries ────────────────────────────────────────────────────────────────────
+
+const INCLUDE_GASTO = [
+  { model: Cuenta, as: "Cuenta", attributes: ["nombre"] },
+  { model: Categoria, as: "CategoriaObj", attributes: ["nombre"] },
+];
+
+const INCLUDE_INGRESO = [
+  { model: Cuenta, as: "Cuenta", attributes: ["nombre"] },
+];
+
+async function fetchGastos(where, limit = 50) {
+  return Gasto.findAll({ where, include: INCLUDE_GASTO, order: [["fecha", "DESC"]], limit });
+}
+
+async function fetchIngresos(where, limit = 50) {
+  return Ingreso.findAll({ where, include: INCLUDE_INGRESO, order: [["fecha", "DESC"]], limit });
+}
+
+// Merge gastos + ingresos, ordena por fecha y limita
+async function fetchMovimientos({ whereGastos, whereIngresos, limit = 10 }) {
+  const [gastos, ingresos] = await Promise.all([
+    whereGastos ? fetchGastos(whereGastos) : [],
+    whereIngresos ? fetchIngresos(whereIngresos) : [],
+  ]);
+
+  return [
+    ...gastos.map(g => ({ esIngreso: false, data: g })),
+    ...ingresos.map(i => ({ esIngreso: true, data: i })),
+  ]
+    .sort((a, b) => new Date(b.data.fecha) - new Date(a.data.fecha))
+    .slice(0, limit);
 }
 
 async function fetchResumenMes(UsuarioId) {
@@ -21,54 +64,185 @@ async function fetchResumenMes(UsuarioId) {
   inicioMes.setDate(1);
   inicioMes.setHours(0, 0, 0, 0);
 
-  const gastos = await Gasto.findAll({
-    where: { UsuarioId, fecha: { [Op.gte]: inicioMes } },
-  });
+  const [gastos, ingresos] = await Promise.all([
+    fetchGastos({ UsuarioId, fecha: { [Op.gte]: inicioMes } }),
+    fetchIngresos({ UsuarioId, fecha: { [Op.gte]: inicioMes } }),
+  ]);
 
-  const mapa = {};
+  const mapaGastos = {};
   for (const g of gastos) {
-    const key = `${g.categoria ?? "Sin categoría"}|${g.moneda}`;
-    if (!mapa[key]) {
-      mapa[key] = { categoria: g.categoria ?? "Sin categoría", moneda: g.moneda, total: 0 };
-    }
-    mapa[key].total += Number(g.monto);
+    const nombreCat = g.CategoriaObj?.nombre ?? "Sin categoría";
+    const key = `${nombreCat}|${g.moneda}`;
+    if (!mapaGastos[key]) mapaGastos[key] = { categoria: nombreCat, moneda: g.moneda, total: 0 };
+    mapaGastos[key].total += Number(g.monto);
   }
 
-  return Object.values(mapa).sort((a, b) => a.categoria.localeCompare(b.categoria));
+  const mapaIngresos = {};
+  for (const i of ingresos) {
+    if (!mapaIngresos[i.moneda]) mapaIngresos[i.moneda] = { moneda: i.moneda, total: 0 };
+    mapaIngresos[i.moneda].total += Number(i.monto);
+  }
+
+  return {
+    gastos: Object.values(mapaGastos).sort((a, b) => a.categoria.localeCompare(b.categoria)),
+    ingresos: Object.values(mapaIngresos),
+  };
 }
 
-export function registerConsultaHandlers(bot) {
-  bot.command("gastos", (ctx) =>
-    ctx.reply("¿Qué gastos querés ver?", FILTRO_KEYBOARD)
+// ── Rangos de fecha ────────────────────────────────────────────────────────────
+
+function rangoHoy() {
+  const desde = new Date();
+  desde.setHours(0, 0, 0, 0);
+  const hasta = new Date(desde);
+  hasta.setDate(hasta.getDate() + 1);
+  return { desde, hasta };
+}
+
+function rangoSemana() {
+  const hasta = new Date();
+  hasta.setHours(23, 59, 59, 999);
+  const desde = new Date();
+  desde.setDate(desde.getDate() - 6);
+  desde.setHours(0, 0, 0, 0);
+  return { desde, hasta };
+}
+
+function rangoMes(year, month) {
+  return { desde: new Date(year, month - 1, 1), hasta: new Date(year, month, 1) };
+}
+
+async function mostrarPorFecha(ctx, titulo, desde, hasta, keyboard) {
+  const UsuarioId = ctx.usuario.id;
+  const LIMIT = 20;
+  const fechaWhere = { [Op.gte]: desde, [Op.lt]: hasta };
+
+  const movimientos = await fetchMovimientos({
+    whereGastos: { UsuarioId, fecha: fechaWhere },
+    whereIngresos: { UsuarioId, fecha: fechaWhere },
+    limit: LIMIT + 1,
+  });
+
+  const hayMas = movimientos.length > LIMIT;
+  const mostrar = hayMas ? movimientos.slice(0, LIMIT) : movimientos;
+
+  if (!mostrar.length) {
+    await ctx.editMessageText(
+      `${titulo}\n\nNo hay movimientos en este período.`,
+      keyboard ? { parse_mode: "Markdown", ...keyboard } : { parse_mode: "Markdown" }
+    );
+    return ctx.answerCbQuery();
+  }
+
+  const cuerpo = mostrar
+    .map(({ esIngreso, data }) => esIngreso ? formatIngreso(data) : formatGasto(data))
+    .join("\n\n──────────\n\n");
+  const pie = hayMas ? "\n\n_... y más movimientos no mostrados_" : "";
+
+  await ctx.editMessageText(
+    `${titulo}\n\n${cuerpo}${pie}`,
+    keyboard ? { parse_mode: "Markdown", ...keyboard } : { parse_mode: "Markdown" }
   );
+  await ctx.answerCbQuery();
+}
+
+// ── Handlers ───────────────────────────────────────────────────────────────────
+
+export function registerConsultaHandlers(bot) {
+  bot.command("gastos", async (ctx) => {
+    const categorias = await getCategorias(ctx.usuario.id);
+    return ctx.reply("¿Qué movimientos querés ver?", filtroKeyboard(categorias));
+  });
 
   bot.action(/^gastos:(.+)$/, async (ctx) => {
     const filtro = ctx.match[1];
     const UsuarioId = ctx.usuario.id;
 
-    if (filtro === "resumen") {
-      const resumen = await fetchResumenMes(UsuarioId);
+    // ── Por fecha ─────────────────────────────────────────────────────────────
+    if (filtro === "fecha") {
+      const hoy = new Date();
+      const year = hoy.getFullYear();
+      const month = hoy.getMonth() + 1;
+      const { desde, hasta } = rangoMes(year, month);
+      const mes = new Date(year, month - 1, 1).toLocaleString("es-CO", { month: "long", year: "numeric" });
+      return mostrarPorFecha(ctx, `📅 *${mes}*`, desde, hasta, fechaNavKeyboard(year, month));
+    }
 
-      if (!resumen.length) {
-        await ctx.editMessageText("No hay gastos registrados este mes.");
+    if (filtro.startsWith("rapido:")) {
+      const tipo = filtro.split(":")[1];
+      let desde, hasta, titulo;
+      if (tipo === "hoy") {
+        ({ desde, hasta } = rangoHoy()); titulo = "📅 *Hoy*";
+      } else if (tipo === "semana") {
+        ({ desde, hasta } = rangoSemana()); titulo = "📅 *Últimos 7 días*";
+      } else if (tipo === "mes") {
+        const hoy = new Date();
+        ({ desde, hasta } = rangoMes(hoy.getFullYear(), hoy.getMonth() + 1));
+        titulo = `📅 *${hoy.toLocaleString("es-CO", { month: "long", year: "numeric" })}*`;
+      } else if (tipo === "mes-anterior") {
+        const hoy = new Date();
+        const month = hoy.getMonth() === 0 ? 12 : hoy.getMonth();
+        const year  = hoy.getMonth() === 0 ? hoy.getFullYear() - 1 : hoy.getFullYear();
+        ({ desde, hasta } = rangoMes(year, month));
+        titulo = `📅 *${new Date(year, month - 1, 1).toLocaleString("es-CO", { month: "long", year: "numeric" })}*`;
+      }
+      return mostrarPorFecha(ctx, titulo, desde, hasta, null);
+    }
+
+    if (filtro.startsWith("nav:")) {
+      const [year, month] = filtro.split(":")[1].split("-").map(Number);
+      const { desde, hasta } = rangoMes(year, month);
+      const mes = new Date(year, month - 1, 1).toLocaleString("es-CO", { month: "long", year: "numeric" });
+      return mostrarPorFecha(ctx, `📅 *${mes}*`, desde, hasta, fechaNavKeyboard(year, month));
+    }
+
+    // ── Resumen ───────────────────────────────────────────────────────────────
+    if (filtro === "resumen") {
+      const { gastos, ingresos } = await fetchResumenMes(UsuarioId);
+      const mes = new Date().toLocaleString("es-CO", { month: "long", year: "numeric" });
+
+      if (!gastos.length && !ingresos.length) {
+        await ctx.editMessageText("No hay movimientos registrados este mes.");
         return ctx.answerCbQuery();
       }
 
-      const mes = new Date().toLocaleString("es-CO", { month: "long", year: "numeric" });
-      const lineas = resumen.map((r) => `🏷 ${r.categoria}: ${formatMonto(r.total, r.moneda)}`);
-      await ctx.editMessageText(`📊 Resumen de ${mes}:\n\n${lineas.join("\n")}`);
+      const lineas = [`📊 *Resumen de ${mes}:*\n`];
+      if (ingresos.length) {
+        lineas.push("📥 *Ingresos*");
+        lineas.push(...ingresos.map(i => `   ${formatMonto(i.total, i.moneda)}`));
+        lineas.push("");
+      }
+      if (gastos.length) {
+        lineas.push("📤 *Gastos por categoría*");
+        lineas.push(...gastos.map(g => `🏷 ${g.categoria}: ${formatMonto(g.total, g.moneda)}`));
+      }
+
+      await ctx.editMessageText(lineas.join("\n"), { parse_mode: "Markdown" });
       return ctx.answerCbQuery();
     }
 
-    const where = { UsuarioId, ...(filtro !== "todos" && { categoria: filtro }) };
-    const gastos = await fetchGastos(where);
+    // ── Filtros por categoría / ingresos / todos ──────────────────────────────
+    let movimientos;
 
-    if (!gastos.length) {
-      await ctx.editMessageText("No hay gastos registrados.");
+    if (filtro === "ingresos") {
+      movimientos = await fetchMovimientos({ whereIngresos: { UsuarioId } });
+    } else if (filtro.startsWith("cat:")) {
+      const CategoriaId = parseInt(filtro.slice(4));
+      movimientos = await fetchMovimientos({ whereGastos: { UsuarioId, CategoriaId } });
+    } else {
+      // todos
+      movimientos = await fetchMovimientos({ whereGastos: { UsuarioId }, whereIngresos: { UsuarioId } });
+    }
+
+    if (!movimientos.length) {
+      await ctx.editMessageText("No hay movimientos registrados.");
       return ctx.answerCbQuery();
     }
 
-    await ctx.editMessageText(gastos.map(formatGasto).join("\n\n──────────\n\n"));
+    await ctx.editMessageText(
+      movimientos.map(({ esIngreso, data }) => esIngreso ? formatIngreso(data) : formatGasto(data))
+        .join("\n\n──────────\n\n")
+    );
     await ctx.answerCbQuery();
   });
 }

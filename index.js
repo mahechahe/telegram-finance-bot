@@ -4,6 +4,8 @@ import { Telegraf } from "telegraf";
 import { sequelize } from "./src/db.js";
 import { authMiddleware } from "./src/middleware/auth.js";
 import { registerAdminHandlers } from "./src/handlers/admin.js";
+import { registerCuentasHandlers } from "./src/handlers/cuentas.js";
+import { registerCategoriasHandlers } from "./src/handlers/categorias.js";
 import { registerRegistroHandlers } from "./src/handlers/registro.js";
 import { registerConsultaHandlers } from "./src/handlers/consulta.js";
 
@@ -17,14 +19,19 @@ bot.use(authMiddleware);
 
 bot.command("start", (ctx) =>
   ctx.reply(
-    "¡Hola! Enviame tus gastos así:\n" +
-      "`25000 Almuerzo` → pesos colombianos\n" +
-      "`10.50 Coffee USD` → dólares\n\n" +
-      "Usá /gastos para consultar tus registros.",
+    "¡Hola! Registrá tus movimientos así:\n" +
+      "`25000 Almuerzo` → egreso en COP\n" +
+      "`10.50 Coffee USD` → egreso en USD\n" +
+      "`+2.500.000 Salario` → ingreso\n\n" +
+      "Usá /cuentas para ver y gestionar tus cuentas.\n" +
+      "Usá /gastos para consultar tus movimientos.\n" +
+      "Usá /categorias para ver y editar tus categorías.",
     { parse_mode: "Markdown" }
   )
 );
 
+registerCuentasHandlers(bot);
+registerCategoriasHandlers(bot);
 registerRegistroHandlers(bot);
 registerConsultaHandlers(bot);
 
